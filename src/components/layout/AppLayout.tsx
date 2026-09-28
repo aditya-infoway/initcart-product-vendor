@@ -60,14 +60,17 @@ export const menuItems: MenuCategory[] = [
         submenu: [],
       },
       {
+        title: "Order Return",
+        icon: <AiFillProduct size={20} />,
+        to: "/orderreturns",
+        submenu: [],
+      },
+      
+      {
         title: "Refund Requests",
         icon: <HiReceiptRefund size={20} />,
-        submenu: [
-          { name: "Pending", to: "/pendingrefund" },
-          { name: "Approved", to: "/approvedrefund" },
-          { name: "Refunded", to: "/refundedrefund" },
-          { name: "Rejected", to: "/rejectedrefund" },
-        ],
+        to: "/refundlist",
+        submenu: [],
       },
     ],
   },
@@ -129,7 +132,7 @@ export const menuItems: MenuCategory[] = [
       {
         title: "Order Report",
         icon: <RiShoppingBag3Fill size={20} />,
-        to: "/orderreport",
+        to: "/OrdersReport",
         submenu: [],
       },
     ],
@@ -140,7 +143,7 @@ export const menuItems: MenuCategory[] = [
       {
         title: "Withdraws",
         icon: <PiHandWithdrawFill size={20} />,
-        to: "/withdraws",
+        to: "/paymentrequestlist",
         submenu: [],
       },
     ],

@@ -1,21 +1,3 @@
-/* import axios from "axios";
-
-// ==== update your backend base url ====
-const apiClient = axios.create({
-  baseURL: "http://127.0.0.1:8000/api/", // <-- correct base
-});
-
-// ---- Attach Token Automatically ----
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-export default apiClient;
- */
 
 // src/api/apiClient.ts
 import axios from "axios";

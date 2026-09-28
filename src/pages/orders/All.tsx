@@ -69,19 +69,19 @@ const All = () => {
     try {
       const response = await axiosInstance.get('/vendor/orders/stats/');
 
-      console.log("📊 Stats Response:", response.data); // Debug
+      console.log(" Stats Response:", response.data); 
 
       if (response.data.success) {
         setOrderStats(response.data.data);
 
         // Debug: Print what we received
-        console.log("📊 Stats received:", response.data.data);
+        console.log(" Stats received:", response.data.data);
       }
     } catch (error) {
       console.error("Error fetching order stats:", error);
     }
   };
-  // pages/vendor/orders/All.tsx - fetchOrders function में सुधार
+
 
 // fetchOrders function mein mapping sahi karein
 const fetchOrders = async () => {
