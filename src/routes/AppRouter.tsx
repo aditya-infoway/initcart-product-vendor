@@ -19,7 +19,7 @@ import ProductReviews from "../pages/productmanagement/ProductReviews";
 import Withdraws from "../pages/business/Withdraws";
 import TransactionsReport from "../pages/report/TransactionsReport";
 import ProductReport from "../pages/report/ProductReport";
-import OrderReport from "../pages/report/OrderReport";
+
 import Products from "../pages/productmanagement/Products";
 import Profile from "../pages/profile/Profile";
 import EditProduct from "../pages/productmanagement/EditProduct";
@@ -28,6 +28,11 @@ import VendorCampaigns from "../pages/campaigns/vendorCampaigns";
 import VendorCouponUsage from "../pages/coupons/CouponUsage";
 import OrderDetailsPage from "../pages/orders/OrderDetails";
 import AddProducts from "../pages/productmanagement/AddProduct2";
+import VendorPaymentRequest from "../pages/payment request/paymentRequest";
+import PaymentRequestList from "../pages/payment request/PaymentRequestList";
+import OrderReport from "../pages/payment request/OrderReport";
+import ReturnRequestList from "../pages/return/ReturnRequestList";
+import VendorRefundList from "../pages/return/refundlist";
 
 
 
@@ -58,7 +63,7 @@ const AppRouter = () => {
 
         <Route path="/transactionsreport" element={<TransactionsReport />} />
         <Route path="/productreport" element={<ProductReport />} />
-        <Route path="/orderreport" element={<OrderReport />} />
+        {/* <Route path="/orderreport" element={<OrderReport />} /> */}
         <Route path="/deals" element={<VendorCampaigns/>}/>
 
         <Route path="/productreviews" element={<ProductReviews />} />
@@ -72,6 +77,11 @@ const AppRouter = () => {
         <Route path="/coupons/usage/:couponId"  element={<VendorCouponUsage />} />
         
         <Route path="/withdraws" element={<Withdraws />} />
+        <Route path="/paymentRequest" element={<VendorPaymentRequest/>}/>   
+        <Route path="/paymentRequestlist" element={<PaymentRequestList/>}/>
+        <Route path="/OrdersReport" element={<OrderReport/>}/>  
+        <Route path="/orderreturns" element={<ReturnRequestList/>}/>  
+        <Route path="/refundlist" element={<VendorRefundList/>}/>                                                                                                                                                                                                                 
 
         {/* Add more protected routes */}
       </Route>

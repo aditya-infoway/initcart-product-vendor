@@ -72,22 +72,24 @@ const DataTable = <T extends { id: number | string }>({
       </div>
 
       {/* Table */}
-      <div className="bg-white/80 backdrop-blur-lg rounded-2xl shadow-lg border border-gray-100 overflow-x-auto">
-        <table className="text-sm text-gray-700 w-full">
+      <div className="bg-white/80 backdrop-blur-lg rounded-2xl shadow-lg border border-gray-200 overflow-x-auto">
+        <table className="text-sm text-gray-700 w-full border-collapse">
           <thead>
-            <tr className="bg-gradient-to-r from-gray-100 to-gray-50 border-b border-gray-200">
-              <th className="px-6 py-4 text-left font-semibold text-gray-600">
+            <tr className="bg-gradient-to-r from-gray-100 to-gray-50 border-b border-gray-300">
+              <th className="px-6 py-4 text-left font-semibold text-gray-600 border-r border-gray-200">
                 #
               </th>
               {showActions && (onEdit || onDelete || onView || onDownload) && (
-                <th className="px-6 py-4 text-center font-semibold text-gray-600">
+                <th className="px-6 py-4 text-center font-semibold text-gray-600 border-r border-gray-200">
                   Action
                 </th>
               )}
-              {columns.map((col) => (
+              {columns.map((col, index) => (
                 <th
                   key={col.key as string}
-                  className="px-6 py-4 text-left font-semibold text-gray-600"
+                  className={`px-6 py-4 text-left font-semibold text-gray-600 ${
+                    index < columns.length - 1 ? "border-r border-gray-200" : ""
+                  }`}
                 >
                   {col.label}
                 </th>
@@ -101,14 +103,14 @@ const DataTable = <T extends { id: number | string }>({
                 key={item.id}
                 whileHover={{ backgroundColor: "#f9fafb" }}
                 transition={{ duration: 0.2 }}
-                className="border-b border-gray-100"
+                className="border-b border-gray-200"
               >
-                <td className="px-6 py-4 font-medium text-gray-800">
+                <td className="px-6 py-4 font-medium text-gray-800 border-r border-gray-200">
                   {offset + index + 1}
                 </td>
 
                 {showActions && (onEdit || onDelete || onView || onDownload) && (
-                  <td className="px-6 py-4 text-center flex justify-center gap-5">
+                  <td className="px-6 py-4 text-center flex justify-center gap-5 border-r border-gray-200">
                     {onView && (
                       <motion.button
                         whileHover={{ scale: 1.1 }}
@@ -152,8 +154,13 @@ const DataTable = <T extends { id: number | string }>({
                   </td>
                 )}
 
-                {columns.map((col) => (
-                  <td key={col.key as string} className="px-6 py-4">
+                {columns.map((col, colIndex) => (
+                  <td
+                    key={col.key as string}
+                    className={`px-6 py-4 ${
+                      colIndex < columns.length - 1 ? "border-r border-gray-200" : ""
+                    }`}
+                  >
                     {col.render ? col.render(item) : (item as any)[col.key]}
                   </td>
                 ))}

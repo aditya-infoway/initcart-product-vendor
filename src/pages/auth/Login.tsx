@@ -251,7 +251,7 @@ const Login = () => {
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
                   onClick={() => {
-              window.location.href = "https://initcart.in/vendor-registration";
+              window.location.href = "https://initcart.com/vendor-registration";
             }}
       className="w-full bg-gradient-to-r from-green-500 to-emerald-600 
                  hover:from-green-600 hover:to-emerald-700 
