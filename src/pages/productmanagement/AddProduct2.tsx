@@ -6,8 +6,110 @@ import { IoMdAddCircle, IoIosArrowDown, IoIosArrowUp } from "react-icons/io";
 import { FiHome, FiDollarSign, FiImage, FiInfo } from "react-icons/fi";
 import ToggleSwitch from "../../components/common/ToggleSwitch";
 import { FaCloudUploadAlt } from "react-icons/fa";
-import Swal from "sweetalert2";  // YEH IMPORT ADD KARO
-import { useNavigate } from "react-router-dom";  //  Navigation ke liye
+import Swal from "sweetalert2";
+import { useNavigate } from "react-router-dom";
+
+// -------------------- IMAGE RULES (validation + auto resize) --------------------
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_ORIGINAL_SIZE_MB = 10; // original file size limit (before resize)
+const MIN_IMAGE_DIMENSION = 300; // minimum width / height in px
+const MAX_GALLERY_IMAGES = 5;
+
+// Every uploaded image is converted to a perfect square so that it fits
+// the product cards on the website without looking small / big / stretched.
+const IMAGE_SIZES = {
+  main: 800,
+  thumbnail: 500,
+  gallery: 800,
+  variant: 800,
+};
+
+const loadImage = (file: File): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`${file.name}: file is not a valid image or is corrupted`));
+    };
+    img.src = url;
+  });
+
+/**
+ * Validates the image and resizes it to a square canvas (size x size).
+ * - Whole product is kept visible (no cropping) and centered on a white background.
+ * - Output is always a JPG (small file size, white background for transparent PNGs).
+ */
+const processProductImage = async (file: File, size: number): Promise<File> => {
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+    throw new Error(`${file.name}: only JPG, PNG or WEBP images are allowed`);
+  }
+  if (file.size > MAX_ORIGINAL_SIZE_MB * 1024 * 1024) {
+    throw new Error(`${file.name}: file is too large (max ${MAX_ORIGINAL_SIZE_MB}MB)`);
+  }
+
+  const img = await loadImage(file);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+
+  if (Math.min(w, h) < MIN_IMAGE_DIMENSION) {
+    throw new Error(
+      `${file.name}: image is too small (${w}x${h}). Minimum ${MIN_IMAGE_DIMENSION}x${MIN_IMAGE_DIMENSION}px required`
+    );
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Image processing is not supported in this browser");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, size, size);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const scale = Math.min(size / w, size / h);
+  const dw = Math.round(w * scale);
+  const dh = Math.round(h * scale);
+  ctx.drawImage(img, Math.round((size - dw) / 2), Math.round((size - dh) / 2), dw, dh);
+
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error(`${file.name}: could not process image`))),
+      "image/jpeg",
+      0.9
+    );
+  });
+
+  const baseName = file.name.replace(/\.[^/.]+$/, "") || "image";
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+};
+
+const showImageError = (messages: string | string[]) => {
+  const text = Array.isArray(messages) ? messages.join("\n") : messages;
+  Swal.fire({
+    title: "⚠️ Image not accepted",
+    text,
+    icon: "warning",
+    confirmButtonColor: "#3085d6",
+  });
+};
+
+// Safe preview for a File (creates & revokes the object URL properly)
+const FilePreview: React.FC<{ file: File; alt: string; className?: string }> = ({ file, alt, className }) => {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  return url ? <img src={url} alt={alt} className={className} /> : null;
+};
 
 // -------------------- TYPES --------------------
 interface Stock {
@@ -29,7 +131,7 @@ interface Stock {
 interface Category {
   id: number;
   name: string;
-  platform_charge: number;  // ✅ Platform charge add kiya
+  platform_charge: number;
 }
 
 interface SubCategory {
@@ -60,11 +162,10 @@ interface Specification {
   value: string;
 }
 
-// NEW: Warranty Interface
 interface Warranty {
   available: boolean;
-  period: string; // e.g., "1 Year", "2 Years", "6 Months", etc.
-  type: string; // "Manufacturer Warranty", "Seller Warranty", "Extended Warranty"
+  period: string;
+  type: string;
   description: string;
 }
 
@@ -91,7 +192,6 @@ interface ProductForm {
   estimated_delivery_time: string;
   free_shipping: boolean;
   specifications: Specification[];
-  // NEW: Warranty field
   warranty: Warranty;
 }
 
@@ -107,7 +207,7 @@ const AddProducts: React.FC<AddProductProps> = ({
   editData,
   onSubmit,
 }) => {
-  const navigate = useNavigate();  
+  const navigate = useNavigate();
   // State for dynamic data
   const [categories, setCategories] = useState<Category[]>([]);
   const [subCategories, setSubCategories] = useState<SubCategory[]>([]);
@@ -115,23 +215,25 @@ const AddProducts: React.FC<AddProductProps> = ({
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(false);
   const [productStatus, setProductStatus] = useState<string>("");
+  const [brandsLoading, setBrandsLoading] = useState(false);
+
+  // Image processing state
+  const [imageProcessing, setImageProcessing] = useState(false);
 
   // File name states
   const [mainName, setMainName] = useState<string>("");
   const [thumbnailName, setThumbnailName] = useState<string>("");
   const [additionalCount, setAdditionalCount] = useState<number>(0);
-  const [additionalPreviews, setAdditionalPreviews] = useState<string[]>([]);
 
-  // NEW: State for collapsible sections
+  // Collapsible sections
   const [showDescriptionSection, setShowDescriptionSection] = useState<boolean>(false);
   const [showSpecificationSection, setShowSpecificationSection] = useState<boolean>(false);
-  // NEW: Warranty section toggle
   const [showWarrantySection, setShowWarrantySection] = useState<boolean>(false);
 
-  // NEW: State for active section
+  // Active section
   const [activeSection, setActiveSection] = useState<string>("product");
 
-  // ✅ NEW: State for platform charge
+  // Platform charge
   const [selectedCategoryPlatformCharge, setSelectedCategoryPlatformCharge] = useState<number>(0);
 
   // Generate SKU
@@ -147,7 +249,7 @@ const AddProducts: React.FC<AddProductProps> = ({
     return parseFloat((basePrice + taxAmount).toFixed(2));
   };
 
-  // ✅ NEW: Calculate vendor receivable from final price
+  // Calculate vendor receivable from final price
   const calculateVendorReceivable = (finalPrice: number, platformCharge: number) => {
     if (!finalPrice || finalPrice <= 0 || !platformCharge || platformCharge <= 0) {
       return finalPrice;
@@ -242,11 +344,49 @@ const AddProducts: React.FC<AddProductProps> = ({
     formik.setFieldValue("stocks", currentStocks);
   };
 
-  // Handle variant image change
-  const handleVariantImageChange = (index: number, file: File | null) => {
-    const updatedStocks = [...formik.values.stocks];
-    updatedStocks[index].variant_image = file;
-    formik.setFieldValue("stocks", updatedStocks);
+  // Handle variant image change (validate + auto resize)
+  const handleVariantImageChange = async (index: number, file: File | null) => {
+    if (!file) {
+      const updatedStocks = [...formik.values.stocks];
+      updatedStocks[index] = { ...updatedStocks[index], variant_image: null };
+      formik.setFieldValue("stocks", updatedStocks);
+      return;
+    }
+
+    setImageProcessing(true);
+    try {
+      const processed = await processProductImage(file, IMAGE_SIZES.variant);
+      const updatedStocks = [...formik.values.stocks];
+      updatedStocks[index] = { ...updatedStocks[index], variant_image: processed };
+      formik.setFieldValue("stocks", updatedStocks);
+    } catch (err: any) {
+      showImageError(err?.message || "Could not process image");
+    } finally {
+      setImageProcessing(false);
+    }
+  };
+
+  // Handle main / thumbnail image change (validate + auto resize)
+  const handleSingleImageChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: "main_image" | "thumbnail_image",
+    size: number,
+    setName: (name: string) => void
+  ) => {
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = "";
+    if (!file) return;
+
+    setImageProcessing(true);
+    try {
+      const processed = await processProductImage(file, size);
+      formik.setFieldValue(field, processed);
+      setName(processed.name);
+    } catch (err: any) {
+      showImageError(err?.message || "Could not process image");
+    } finally {
+      setImageProcessing(false);
+    }
   };
 
   // Update description feature
@@ -266,7 +406,7 @@ const AddProducts: React.FC<AddProductProps> = ({
 
     // Format stocks data
     const formattedStocks = productData.stocks && productData.stocks.length > 0
-      ? productData.stocks.map((stock: any, index: number) => ({
+      ? productData.stocks.map((stock: any) => ({
         mrp: parseFloat(stock.mrp) || 0,
         selling_price: parseFloat(stock.selling_price) || 0,
         tax: parseFloat(stock.tax) || 0,
@@ -326,7 +466,7 @@ const AddProducts: React.FC<AddProductProps> = ({
         { id: 6, title: "", value: "" }
       ];
 
-    // NEW: Format warranty data
+    // Format warranty data
     const formattedWarranty = productData.warranty || {
       available: false,
       period: "",
@@ -409,7 +549,6 @@ const AddProducts: React.FC<AddProductProps> = ({
       estimated_delivery_time: "",
       free_shipping: false,
       specifications: [],
-      // NEW: Warranty initial values
       warranty: {
         available: false,
         period: "",
@@ -423,117 +562,112 @@ const AddProducts: React.FC<AddProductProps> = ({
       category: Yup.string().required("Category is required"),
       sku: Yup.string().required("SKU is required"),
       product_type: Yup.string().required("Product Type is required"),
-      
     }),
-    
 
-onSubmit: async (values) => {
-  setLoading(true);
+    onSubmit: async (values) => {
+      setLoading(true);
 
-  try {
-    const formData = new FormData();
+      try {
+        const formData = new FormData();
 
-    // Append basic fields
-    formData.append("product_name", values.product_name);
-    formData.append("sku", values.sku);
+        // Append basic fields
+        formData.append("product_name", values.product_name);
+        formData.append("sku", values.sku);
 
-    if (values.category) formData.append("category", values.category);
-    if (values.subcategory) formData.append("subcategory", values.subcategory);
-    if (values.subsubcategory) formData.append("subsubcategory", values.subsubcategory);
-    if (values.brand) formData.append("brand", values.brand.toString());
+        if (values.category) formData.append("category", values.category);
+        if (values.subcategory) formData.append("subcategory", values.subcategory);
+        if (values.subsubcategory) formData.append("subsubcategory", values.subsubcategory);
+        if (values.brand) formData.append("brand", values.brand.toString());
 
-    formData.append("product_type", values.product_type);
-    formData.append("keywords", values.keywords);
-    formData.append("short_description", values.short_description);
+        formData.append("product_type", values.product_type);
+        formData.append("keywords", values.keywords);
+        formData.append("short_description", values.short_description);
 
-    // Append description features as JSON
-    const validDescriptionFeatures = values.description_features.filter(feature =>
-      feature.value.trim() !== ""
-    );
-    if (validDescriptionFeatures.length > 0) {
-      formData.append("description_features", JSON.stringify(validDescriptionFeatures));
-    }
+        // Append description features as JSON
+        const validDescriptionFeatures = values.description_features.filter(feature =>
+          feature.value.trim() !== ""
+        );
+        if (validDescriptionFeatures.length > 0) {
+          formData.append("description_features", JSON.stringify(validDescriptionFeatures));
+        }
 
-    // Append specifications as JSON
-    const validSpecifications = values.specifications.filter(spec =>
-      spec.title.trim() !== "" && spec.value.trim() !== ""
-    );
-    if (validSpecifications.length > 0) {
-      formData.append("specifications", JSON.stringify(validSpecifications));
-    }
+        // Append specifications as JSON
+        const validSpecifications = values.specifications.filter(spec =>
+          spec.title.trim() !== "" && spec.value.trim() !== ""
+        );
+        if (validSpecifications.length > 0) {
+          formData.append("specifications", JSON.stringify(validSpecifications));
+        }
 
-    // NEW: Append warranty as JSON
-    formData.append("warranty", JSON.stringify(values.warranty));
+        // Append warranty as JSON
+        formData.append("warranty", JSON.stringify(values.warranty));
 
-    formData.append("product_video_url", values.product_video_url);
-    formData.append("product_condition", values.product_condition);
-    formData.append("manufacturing_date", values.manufacturing_date);
-    formData.append("expiry_date", values.expiry_date);
-    formData.append("return_policy", values.return_policy);
-    formData.append("estimated_delivery_time", values.estimated_delivery_time);
-    formData.append("free_shipping", values.free_shipping.toString());
+        formData.append("product_video_url", values.product_video_url);
+        formData.append("product_condition", values.product_condition);
+        formData.append("manufacturing_date", values.manufacturing_date);
+        formData.append("expiry_date", values.expiry_date);
+        formData.append("return_policy", values.return_policy);
+        formData.append("estimated_delivery_time", values.estimated_delivery_time);
+        formData.append("free_shipping", values.free_shipping.toString());
 
-    if (isEdit) {
-      formData.append("status", "pending");
-    }
+        if (isEdit) {
+          formData.append("status", "pending");
+        }
 
-    // Stocks fields
-    values.stocks.forEach((stock, index) => {
-      formData.append(`stocks[${index}][mrp]`, stock.mrp.toString());
-      formData.append(`stocks[${index}][selling_price]`, stock.selling_price.toString());
-      formData.append(`stocks[${index}][tax]`, stock.tax.toString());
-      formData.append(`stocks[${index}][stock_quantity]`, stock.stock_quantity.toString());
-      formData.append(`stocks[${index}][barcode]`, stock.barcode);
-      formData.append(`stocks[${index}][unit]`, stock.unit);
-      formData.append(`stocks[${index}][weight]`, stock.weight);
-      formData.append(`stocks[${index}][color]`, stock.color);
-      formData.append(`stocks[${index}][size]`, stock.size);
-      formData.append(`stocks[${index}][maximum_order_quantity]`, stock.maximum_order_quantity.toString());
-      formData.append(`stocks[${index}][final_price]`, stock.final_price.toString());
-      
-      // Append variant image if exists
-      if (stock.variant_image) {
-        formData.append(`variant_images[${index}]`, stock.variant_image);
-      }
-      
-      // For edit mode, send variant_image_url if no new image
-      if (isEdit && !stock.variant_image && stock.variant_image_url) {
-        formData.append(`stocks[${index}][variant_image_url]`, stock.variant_image_url);
-      }
-    });
+        // Stocks fields
+        values.stocks.forEach((stock, index) => {
+          formData.append(`stocks[${index}][mrp]`, stock.mrp.toString());
+          formData.append(`stocks[${index}][selling_price]`, stock.selling_price.toString());
+          formData.append(`stocks[${index}][tax]`, stock.tax.toString());
+          formData.append(`stocks[${index}][stock_quantity]`, stock.stock_quantity.toString());
+          formData.append(`stocks[${index}][barcode]`, stock.barcode);
+          formData.append(`stocks[${index}][unit]`, stock.unit);
+          formData.append(`stocks[${index}][weight]`, stock.weight);
+          formData.append(`stocks[${index}][color]`, stock.color);
+          formData.append(`stocks[${index}][size]`, stock.size);
+          formData.append(`stocks[${index}][maximum_order_quantity]`, stock.maximum_order_quantity.toString());
+          formData.append(`stocks[${index}][final_price]`, stock.final_price.toString());
 
-    // Images - FOR VARIANT PRODUCTS, MAIN IMAGE IS NOT REQUIRED
-    // Only append main image if it exists (for simple products or when user uploads)
-    if (values.main_image) {
-      formData.append("main_image", values.main_image);
-    }
-    
-    // Always append thumbnail and gallery if they exist
-    if (values.thumbnail_image) formData.append("thumbnail_image", values.thumbnail_image);
+          // Append variant image if exists
+          if (stock.variant_image) {
+            formData.append(`variant_images[${index}]`, stock.variant_image);
+          }
 
-    values.gallery_images.forEach((file) => {
-      formData.append("gallery_images", file);
-    });
+          // For edit mode, send variant_image_url if no new image
+          if (isEdit && !stock.variant_image && stock.variant_image_url) {
+            formData.append(`stocks[${index}][variant_image_url]`, stock.variant_image_url);
+          }
+        });
 
-    // API URLs
-    const url = isEdit && editData?.id
-      ? `vendor/products/${editData.id}/`
-      : "vendor/create/";
+        // Images - FOR VARIANT PRODUCTS, MAIN IMAGE IS NOT REQUIRED
+        if (values.main_image) {
+          formData.append("main_image", values.main_image);
+        }
 
-    const response = await axiosInstance({
-      method: isEdit ? 'PUT' : 'POST',
-      url: url,
-      data: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+        if (values.thumbnail_image) formData.append("thumbnail_image", values.thumbnail_image);
 
-    // ✅ SWEETALERT FOR SUCCESS - YEH PURA BLOCK REPLACE KARO
-    if (isEdit) {
-      await Swal.fire({
-        title: "🎉 Product Updated!",
-        html: `
+        values.gallery_images.forEach((file) => {
+          formData.append("gallery_images", file);
+        });
+
+        // API URLs
+        const url = isEdit && editData?.id
+          ? `vendor/products/${editData.id}/`
+          : "vendor/create/";
+
+        const response = await axiosInstance({
+          method: isEdit ? 'PUT' : 'POST',
+          url: url,
+          data: formData,
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+
+        if (isEdit) {
+          await Swal.fire({
+            title: "🎉 Product Updated!",
+            html: `
           <div class="text-left">
             <p class="text-lg font-semibold text-green-600 mb-2">"${response.data.product_name}"</p>
             <p class="mb-3">has been updated and sent for re-approval.</p>
@@ -543,16 +677,16 @@ onSubmit: async (values) => {
             <p class="text-sm text-gray-600">Our admin team will review the changes. The product will be temporarily hidden until approved again.</p>
           </div>
         `,
-        icon: "success",
-        confirmButtonColor: "#3085d6",
-        confirmButtonText: "OK",
-        timer: 5000,
-        timerProgressBar: true,
-      });
-    } else {
-      await Swal.fire({
-        title: "🎉 Product Submitted!",
-        html: `
+            icon: "success",
+            confirmButtonColor: "#3085d6",
+            confirmButtonText: "OK",
+            timer: 5000,
+            timerProgressBar: true,
+          });
+        } else {
+          await Swal.fire({
+            title: "🎉 Product Submitted!",
+            html: `
           <div class="text-left">
             <p class="text-lg font-semibold text-green-600 mb-2">"${response.data.product_name}"</p>
             <p class="mb-3">has been submitted for verification.</p>
@@ -568,173 +702,139 @@ onSubmit: async (values) => {
             <p class="text-sm text-gray-600">Thank you for your patience!</p>
           </div>
         `,
-        icon: "success",
-        confirmButtonColor: "#3085d6",
-        confirmButtonText: "OK",
-        timer: 6000,
-        timerProgressBar: true,
-      });
-    }
+            icon: "success",
+            confirmButtonColor: "#3085d6",
+            confirmButtonText: "OK",
+            timer: 6000,
+            timerProgressBar: true,
+          });
+        }
 
-    if (onSubmit) {
-      onSubmit(values);
-    }
+        if (onSubmit) {
+          onSubmit(values);
+        }
 
-    if (!isEdit) {
-      formik.resetForm();
-      setMainName("");
-      setThumbnailName("");
-      setAdditionalCount(0);
-      setAdditionalPreviews([]);
-      setShowDescriptionSection(false);
-      setShowSpecificationSection(false);
-      setShowWarrantySection(false);
-    }
+        if (!isEdit) {
+          formik.resetForm();
+          setMainName("");
+          setThumbnailName("");
+          setAdditionalCount(0);
+          setShowDescriptionSection(false);
+          setShowSpecificationSection(false);
+          setShowWarrantySection(false);
+        }
 
-    // ✅ Navigate to products page after success
-    navigate("/products");
+        navigate("/products");
 
-  } catch (error: any) {
-    console.error("❌ SUBMIT ERROR:", error);
+      } catch (error: any) {
+        console.error("❌ SUBMIT ERROR:", error);
 
-    // ✅ SWEETALERT FOR ERROR
-    if (error.response?.status === 401) {
+        if (error.response?.status === 401) {
+          Swal.fire({
+            title: "🔐 Session Expired",
+            text: "Please login again to continue.",
+            icon: "warning",
+            confirmButtonColor: "#3085d6",
+            confirmButtonText: "Login Now"
+          }).then(() => {
+            window.location.href = '/login';
+          });
+        } else if (error.response?.data) {
+          let errorMessage = "";
+          const errorResponse = error.response.data;
+
+          if (typeof errorResponse === 'object') {
+            Object.keys(errorResponse).forEach(key => {
+              if (Array.isArray(errorResponse[key])) {
+                errorMessage += `${key}: ${errorResponse[key].join(', ')}\n`;
+              } else {
+                errorMessage += `${key}: ${errorResponse[key]}\n`;
+              }
+            });
+          } else {
+            errorMessage = JSON.stringify(errorResponse);
+          }
+
+          Swal.fire({
+            title: "❌ Submission Failed",
+            text: errorMessage,
+            icon: "error",
+            confirmButtonColor: "#d33",
+            confirmButtonText: "Try Again"
+          });
+        } else {
+          Swal.fire({
+            title: "❌ Something Went Wrong",
+            text: "Please try again later.",
+            icon: "error",
+            confirmButtonColor: "#d33",
+            confirmButtonText: "OK"
+          });
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+  });
+
+  const validateForm = async () => {
+    const errors = await formik.validateForm();
+    if (Object.keys(errors).length > 0) {
+      const errorMessages = Object.values(errors).join('\n');
       Swal.fire({
-        title: "🔐 Session Expired",
-        text: "Please login again to continue.",
+        title: "⚠️ Validation Error",
+        text: errorMessages,
         icon: "warning",
         confirmButtonColor: "#3085d6",
-        confirmButtonText: "Login Now"
-      }).then(() => {
-        window.location.href = '/login';
       });
-    } else if (error.response?.data) {
-      let errorMessage = "";
-      const errorResponse = error.response.data;
-      
-      if (typeof errorResponse === 'object') {
-        Object.keys(errorResponse).forEach(key => {
-          if (Array.isArray(errorResponse[key])) {
-            errorMessage += `${key}: ${errorResponse[key].join(', ')}\n`;
-          } else {
-            errorMessage += `${key}: ${errorResponse[key]}\n`;
-          }
-        });
-      } else {
-        errorMessage = JSON.stringify(errorResponse);
-      }
-      
-      Swal.fire({
-        title: "❌ Submission Failed",
-        text: errorMessage,
-        icon: "error",
-        confirmButtonColor: "#d33",
-        confirmButtonText: "Try Again"
-      });
-    } else {
-      Swal.fire({
-        title: "❌ Something Went Wrong",
-        text: "Please try again later.",
-        icon: "error",
-        confirmButtonColor: "#d33",
-        confirmButtonText: "OK"
-      });
+      return false;
     }
-  } finally {
-    setLoading(false);
-  }
-},
-  });
-  // Formik validationSchema ke baad yeh add kar sakte ho
-const validateForm = async () => {
-  const errors = await formik.validateForm();
-  if (Object.keys(errors).length > 0) {
-    const errorMessages = Object.values(errors).join('\n');
-    Swal.fire({
-      title: "⚠️ Validation Error",
-      text: errorMessages,
-      icon: "warning",
-      confirmButtonColor: "#3085d6",
-    });
-    return false;
-  }
-  return true;
-};
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
-  const [brandsLoading, setBrandsLoading] = useState(false);
+    return true;
+  };
 
-  // Additional Images utility functions
+  // Additional (gallery) images utility functions
   const handleAdditionalImagesRemove = (index: number) => {
     const newFiles = formik.values.gallery_images.filter((_, i) => i !== index);
     formik.setFieldValue("gallery_images", newFiles);
     setAdditionalCount(newFiles.length);
-
-    if (additionalPreviews[index]) {
-      URL.revokeObjectURL(additionalPreviews[index]);
-      const newPreviews = additionalPreviews.filter((_, i) => i !== index);
-      setAdditionalPreviews(newPreviews);
-    }
   };
 
-  const validateImageFiles = (files: File[]): File[] => {
-    return files.filter(file => {
-      if (!file.type.startsWith('image/')) {
-        alert(`File ${file.name} is not an image`);
-        return false;
-      }
-
-      if (file.size > 5 * 1024 * 1024) {
-        alert(`File ${file.name} is too large. Maximum size is 5MB`);
-        return false;
-      }
-
-      return true;
-    });
-  };
-
-  const handleAdditionalImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAdditionalImagesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
 
-    if (files.length > 5) {
-      alert("Maximum 5 additional images allowed");
+    const existing = formik.values.gallery_images.length;
+    if (existing + files.length > MAX_GALLERY_IMAGES) {
+      showImageError(
+        `You can upload maximum ${MAX_GALLERY_IMAGES} additional images. You already have ${existing} selected.`
+      );
       return;
     }
 
-    const totalImages = formik.values.gallery_images.length + files.length;
-    if (totalImages > 5) {
-      alert(`You can only upload 5 images total. You already have ${formik.values.gallery_images.length} images selected.`);
-      return;
-    }
+    setImageProcessing(true);
+    try {
+      const results = await Promise.allSettled(
+        files.map((f) => processProductImage(f, IMAGE_SIZES.gallery))
+      );
 
-    const validFiles = validateImageFiles(files);
+      const okFiles: File[] = [];
+      const errors: string[] = [];
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") okFiles.push(r.value);
+        else errors.push(r.reason?.message || `${files[i].name}: could not be processed`);
+      });
 
-    if (validFiles.length > 0) {
-      const allFiles = [...formik.values.gallery_images, ...validFiles];
-
-      formik.setFieldValue("gallery_images", allFiles);
-      setAdditionalCount(allFiles.length);
-
-      const newPreviews = validFiles.map(file => URL.createObjectURL(file));
-      setAdditionalPreviews(prev => [...prev, ...newPreviews]);
-
-      e.target.value = '';
+      if (okFiles.length > 0) {
+        const allFiles = [...formik.values.gallery_images, ...okFiles];
+        formik.setFieldValue("gallery_images", allFiles);
+        setAdditionalCount(allFiles.length);
+      }
+      if (errors.length > 0) showImageError(errors);
+    } finally {
+      setImageProcessing(false);
     }
   };
-
-  // Cleanup for image URLs
-  useEffect(() => {
-    return () => {
-      additionalPreviews.forEach(url => URL.revokeObjectURL(url));
-      
-      // Cleanup variant image URLs
-      formik.values.stocks.forEach(stock => {
-        if (stock.variant_image) {
-          const url = URL.createObjectURL(stock.variant_image);
-          URL.revokeObjectURL(url);
-        }
-      });
-    };
-  }, [additionalPreviews, formik.values.stocks]);
 
   // Fetch categories and brands
   useEffect(() => {
@@ -748,7 +848,6 @@ const validateForm = async () => {
       const simpleStock: Stock = {
         mrp: 0,
         selling_price: 0,
-
         tax: 0,
         stock_quantity: 0,
         barcode: "",
@@ -769,8 +868,7 @@ const validateForm = async () => {
   useEffect(() => {
     if (formik.values.category) {
       fetchSubCategories(formik.values.category);
-      
-      // ✅ NEW: Set platform charge when category changes
+
       const selectedCat = categories.find(c => c.id.toString() === formik.values.category);
       if (selectedCat) {
         setSelectedCategoryPlatformCharge(selectedCat.platform_charge || 0);
@@ -778,7 +876,7 @@ const validateForm = async () => {
     } else {
       setSubCategories([]);
       setSubSubCategories([]);
-      setSelectedCategoryPlatformCharge(0); // ✅ Reset platform charge
+      setSelectedCategoryPlatformCharge(0);
     }
   }, [formik.values.category, categories]);
 
@@ -806,8 +904,7 @@ const validateForm = async () => {
 
       if (editData.category) {
         fetchSubCategories(editData.category.toString());
-        
-        // ✅ NEW: Set platform charge in edit mode
+
         const selectedCat = categories.find(c => c.id.toString() === editData.category.toString());
         if (selectedCat) {
           setSelectedCategoryPlatformCharge(selectedCat.platform_charge || 0);
@@ -934,7 +1031,7 @@ const validateForm = async () => {
                       <option value="">Select Category</option>
                       {categories.map((cat) => (
                         <option key={cat.id} value={cat.id}>
-                          {cat.name} 
+                          {cat.name}
                         </option>
                       ))}
                     </select>
@@ -1057,7 +1154,6 @@ const validateForm = async () => {
                     )}
                   </button>
 
-                  {/* Description Section Content (Hidden by default) */}
                   {showDescriptionSection && (
                     <div className="mt-4 p-6 border border-gray-200 rounded-lg bg-white shadow-sm">
                       {/* Short Description */}
@@ -1075,7 +1171,6 @@ const validateForm = async () => {
 
                       <h2 className="font-medium text-gray-800 mb-4">Key Features</h2>
 
-                      {/* 6 Input Boxes for Description Features */}
                       <div className="space-y-4">
                         {formik.values.description_features.map((feature, index) => (
                           <div key={feature.id} className="flex gap-4 items-center">
@@ -1119,7 +1214,7 @@ const validateForm = async () => {
                 Pricing & Stock
               </h2>
 
-              {/* ✅ Platform Charge Info Banner - SIRF YEH BANNER ADD KIYA */}
+              {/* Platform Charge Info Banner */}
               {selectedCategoryPlatformCharge > 0 && (
                 <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <div className="flex items-start gap-3">
@@ -1131,7 +1226,6 @@ const validateForm = async () => {
                     <div>
                       <h4 className="font-medium text-blue-800">Platform Charge: {selectedCategoryPlatformCharge}%</h4>
                       <p className="text-blue-700 text-sm mt-1">
-                       
                         This amount will be deducted from your final price (including tax).
                       </p>
                     </div>
@@ -1142,8 +1236,7 @@ const validateForm = async () => {
               <div className="space-y-6">
                 {formik.values.stocks.map((stock, index) => {
                   const finalSellingPrice = calculateFinalSellingPrice(stock.selling_price, stock.tax);
-                  
-                  // ✅ NEW: Calculate vendor receivable from final price
+
                   const vendorReceivable = calculateVendorReceivable(finalSellingPrice, selectedCategoryPlatformCharge);
                   const platformDeduction = finalSellingPrice - vendorReceivable;
 
@@ -1243,13 +1336,12 @@ const validateForm = async () => {
                           Customer Price: ₹{finalSellingPrice}
                         </div>
                       </div>
-                      
-                      {/* ✅ NEW: Vendor Receivable Info - Platform charge on FINAL PRICE */}
+
+                      {/* Vendor Receivable Info */}
                       {selectedCategoryPlatformCharge > 0 && (
                         <div className="col-span-full mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                     
                               <span className="text-sm text-gray-600">Final Price (with tax):</span>
                               <span className="ml-2 font-semibold">₹{finalSellingPrice.toFixed(2)}</span>
                             </div>
@@ -1328,7 +1420,7 @@ const validateForm = async () => {
                         />
                       </div>
 
-                      {/* MAX ORDER QUANTITY - NOW SHOWS FOR BOTH SIMPLE AND VARIANT */}
+                      {/* Max Order Quantity */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Max Order Quantity *
@@ -1376,7 +1468,7 @@ const validateForm = async () => {
                               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             />
                           </div>
-                          
+
                           {/* Variant Image Upload Section */}
                           <div className="col-span-full mt-4 pt-4 border-t">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1385,50 +1477,50 @@ const validateForm = async () => {
                                 Upload image specific to this variant (e.g., Red T-shirt)
                               </span>
                             </label>
-                            
+
                             <div className="flex items-center gap-4">
                               <label className="flex flex-col items-center justify-center border-2 border-dashed border-purple-300 rounded-lg p-4 cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-colors text-center min-h-[120px] min-w-[120px]">
                                 <FaCloudUploadAlt className="text-purple-500 text-2xl mb-2" />
                                 <span className="text-purple-600 font-medium text-xs mb-1">
-                                  {stock.variant_image ? stock.variant_image.name : 
-                                   stock.variant_image_url ? "Image uploaded" : 
-                                   "Click to upload"}
+                                  {stock.variant_image ? stock.variant_image.name :
+                                    stock.variant_image_url ? "Image uploaded" :
+                                      "Click to upload"}
                                 </span>
-                                
+
                                 {/* Show existing image in edit mode */}
                                 {isEdit && stock.variant_image_url && !stock.variant_image && (
                                   <img
                                     src={stock.variant_image_url}
                                     alt={`Variant ${index + 1}`}
-                                    className="mt-2 w-20 h-20 object-cover rounded border"
+                                    className="mt-2 w-20 h-20 object-contain bg-white rounded border"
                                   />
                                 )}
-                                
-                                {/* Show new uploaded image preview */}
+
+                                {/* Show new uploaded (resized) image preview */}
                                 {stock.variant_image && (
-                                  <img
-                                    src={URL.createObjectURL(stock.variant_image)}
+                                  <FilePreview
+                                    file={stock.variant_image}
                                     alt={`Variant ${index + 1} preview`}
-                                    className="mt-2 w-20 h-20 object-cover rounded border"
+                                    className="mt-2 w-20 h-20 object-contain bg-white rounded border"
                                   />
                                 )}
-                                
+
                                 <input
                                   type="file"
-                                  accept="image/*"
+                                  accept="image/jpeg,image/png,image/webp"
                                   onChange={(e) => {
                                     const file = e.target.files?.[0] || null;
-                                    handleVariantImageChange(index, file);
+                                    e.target.value = "";
+                                    if (file) handleVariantImageChange(index, file);
                                   }}
                                   className="hidden"
                                 />
                               </label>
-                              
+
                               <div className="text-sm text-gray-600">
                                 <p className="font-medium">Variant Image</p>
                                 <p className="text-xs mt-1">
-                                  Upload an image that represents this specific variant.
-                                  Recommended: 500x500px, JPG/PNG
+                                  Auto-resized to {IMAGE_SIZES.variant}x{IMAGE_SIZES.variant}px. JPG / PNG / WEBP, min {MIN_IMAGE_DIMENSION}x{MIN_IMAGE_DIMENSION}px.
                                 </p>
                                 {stock.variant_image && (
                                   <button
@@ -1488,9 +1580,25 @@ const validateForm = async () => {
           {/* 3. Product Images Section */}
           {(activeSection === "images" || activeSection === "all") && (
             <div className="bg-white rounded-xl shadow-lg p-6">
-              <h2 className="text-2xl font-bold text-gray-800 mb-6 border-b pb-2">
-                Product Images & Media
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-6 border-b pb-2">
+                <h2 className="text-2xl font-bold text-gray-800">
+                  Product Images & Media
+                </h2>
+                {imageProcessing && (
+                  <span className="flex items-center gap-2 text-sm text-blue-600">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Optimizing image...
+                  </span>
+                )}
+              </div>
+
+              <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                All images are automatically resized to a perfect square so they fit the product cards on the website.
+                Allowed: JPG, PNG, WEBP (max {MAX_ORIGINAL_SIZE_MB}MB, min {MIN_IMAGE_DIMENSION}x{MIN_IMAGE_DIMENSION}px). Your full product stays visible, nothing is cropped.
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Main Image - HIDE FOR VARIANT PRODUCTS */}
@@ -1505,33 +1613,29 @@ const validateForm = async () => {
                         {mainName || "Click to upload main image"}
                       </span>
                       <span className="text-gray-500 text-xs">
-                        Recommended: 800x800px, JPG/PNG
+                        Auto-resized to {IMAGE_SIZES.main}x{IMAGE_SIZES.main}px
                       </span>
 
                       {isEdit && editData?.main_image && !formik.values.main_image && (
                         <img
                           src={editData.main_image}
                           alt="Main preview"
-                          className="mt-3 w-full h-32 object-cover rounded border"
+                          className="mt-3 w-full h-32 object-contain bg-white rounded border"
                         />
                       )}
 
                       {formik.values.main_image && (
-                        <img
-                          src={URL.createObjectURL(formik.values.main_image)}
+                        <FilePreview
+                          file={formik.values.main_image}
                           alt="Main preview"
-                          className="mt-3 w-full h-32 object-cover rounded border"
+                          className="mt-3 w-full h-32 object-contain bg-white rounded border"
                         />
                       )}
 
                       <input
                         type="file"
-                        accept="image/*"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] ?? null;
-                          formik.setFieldValue("main_image", file);
-                          setMainName(file ? file.name : "");
-                        }}
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => handleSingleImageChange(e, "main_image", IMAGE_SIZES.main, setMainName)}
                         className="hidden"
                       />
                     </label>
@@ -1565,33 +1669,29 @@ const validateForm = async () => {
                       {thumbnailName || "Click to upload thumbnail"}
                     </span>
                     <span className="text-gray-500 text-xs">
-                      Recommended: 400x400px, JPG/PNG
+                      Auto-resized to {IMAGE_SIZES.thumbnail}x{IMAGE_SIZES.thumbnail}px
                     </span>
 
                     {isEdit && editData?.thumbnail_image && !formik.values.thumbnail_image && (
                       <img
                         src={editData.thumbnail_image}
                         alt="Thumbnail preview"
-                        className="mt-3 w-full h-32 object-cover rounded border"
+                        className="mt-3 w-full h-32 object-contain bg-white rounded border"
                       />
                     )}
 
                     {formik.values.thumbnail_image && (
-                      <img
-                        src={URL.createObjectURL(formik.values.thumbnail_image)}
+                      <FilePreview
+                        file={formik.values.thumbnail_image}
                         alt="Thumbnail preview"
-                        className="mt-3 w-full h-32 object-cover rounded border"
+                        className="mt-3 w-full h-32 object-contain bg-white rounded border"
                       />
                     )}
 
                     <input
                       type="file"
-                      accept="image/*"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0] ?? null;
-                        formik.setFieldValue("thumbnail_image", file);
-                        setThumbnailName(file ? file.name : "");
-                      }}
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => handleSingleImageChange(e, "thumbnail_image", IMAGE_SIZES.thumbnail, setThumbnailName)}
                       className="hidden"
                     />
                   </label>
@@ -1610,7 +1710,7 @@ const validateForm = async () => {
                         : "Click to upload additional images"}
                     </span>
                     <span className="text-gray-500 text-xs">
-                      Multiple images allowed (Max 5 images)
+                      Multiple images allowed (Max {MAX_GALLERY_IMAGES} images)
                     </span>
 
                     {isEdit && editData?.gallery?.length && formik.values.gallery_images.length === 0 && (
@@ -1620,7 +1720,7 @@ const validateForm = async () => {
                             <img
                               src={url.image}
                               alt={`Additional ${idx + 1}`}
-                              className="w-16 h-16 object-cover rounded border"
+                              className="w-16 h-16 object-contain bg-white rounded border"
                             />
                           </div>
                         ))}
@@ -1630,15 +1730,16 @@ const validateForm = async () => {
                     {formik.values.gallery_images.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-3">
                         {formik.values.gallery_images.map((file, idx) => (
-                          <div key={idx} className="relative">
-                            <img
-                              src={URL.createObjectURL(file)}
+                          <div key={`${file.name}-${file.lastModified}-${idx}`} className="relative">
+                            <FilePreview
+                              file={file}
                               alt={`Additional ${idx + 1}`}
-                              className="w-16 h-16 object-cover rounded border"
+                              className="w-16 h-16 object-contain bg-white rounded border"
                             />
                             <button
                               type="button"
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 handleAdditionalImagesRemove(idx);
                               }}
@@ -1653,7 +1754,7 @@ const validateForm = async () => {
 
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp"
                       multiple
                       onChange={handleAdditionalImagesChange}
                       className="hidden"
@@ -1663,7 +1764,7 @@ const validateForm = async () => {
                   {additionalCount > 0 && (
                     <div className="text-sm text-gray-600 mt-2">
                       {additionalCount} image{additionalCount > 1 ? 's' : ''} selected
-                      {additionalCount >= 5 && (
+                      {additionalCount >= MAX_GALLERY_IMAGES && (
                         <span className="text-red-500 ml-2">Maximum limit reached</span>
                       )}
                     </div>
@@ -1769,7 +1870,7 @@ const validateForm = async () => {
                   </div>
                 </div>
 
-                {/* NEW: Warranty Section */}
+                {/* Warranty Section */}
                 <div>
                   <button
                     type="button"
@@ -1784,7 +1885,6 @@ const validateForm = async () => {
                     )}
                   </button>
 
-                  {/* Warranty Section Content */}
                   {showWarrantySection && (
                     <div className="mt-2 p-6 border border-gray-200 rounded-lg bg-white shadow-sm">
                       <div className="flex items-center gap-3 mb-6">
@@ -1871,7 +1971,6 @@ const validateForm = async () => {
                     )}
                   </button>
 
-                  {/* Specification Section Content */}
                   {showSpecificationSection && (
                     <div className="mt-2 p-6 border border-gray-200 rounded-lg bg-white shadow-sm">
                       <h4 className="font-semibold text-gray-800 mb-6">Product Specifications</h4>
@@ -1986,7 +2085,7 @@ const validateForm = async () => {
                   </button>
                   <button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || imageProcessing}
                     className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                   >
                     {loading ? (
