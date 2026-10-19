@@ -49,6 +49,17 @@ export const menuItems: MenuCategory[] = [
       },
     ],
   },
+    {
+    category: "Website",
+    items: [
+      {
+        title: "Top Seller Request",
+        icon: <MdDashboard size={20} />,
+        to: "/topsellerrequest",
+        submenu: [],
+      },
+    ],
+  },
   {
     category: "Orders",
 

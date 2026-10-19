@@ -33,6 +33,7 @@ import PaymentRequestList from "../pages/payment request/PaymentRequestList";
 import OrderReport from "../pages/payment request/OrderReport";
 import ReturnRequestList from "../pages/return/ReturnRequestList";
 import VendorRefundList from "../pages/return/refundlist";
+import TopSellerRequest from "../pages/topseller/TopSellerRequest";
 
 
 
@@ -81,7 +82,8 @@ const AppRouter = () => {
         <Route path="/paymentRequestlist" element={<PaymentRequestList/>}/>
         <Route path="/OrdersReport" element={<OrderReport/>}/>  
         <Route path="/orderreturns" element={<ReturnRequestList/>}/>  
-        <Route path="/refundlist" element={<VendorRefundList/>}/>                                                                                                                                                                                                                 
+        <Route path="/refundlist" element={<VendorRefundList/>}/> 
+        <Route path="/topsellerrequest" element={<TopSellerRequest />} />                                                                                                                                                                                                            
 
         {/* Add more protected routes */}
       </Route>

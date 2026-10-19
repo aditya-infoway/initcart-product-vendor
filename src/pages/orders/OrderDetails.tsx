@@ -23,11 +23,13 @@ interface OrderItem {
   discount_amount: number;
   total_price: number;
   item_status: string;
+  returned_quantity: number;
   product_details: {
     main_image: string | null;
     thumbnail: string | null;
     variant_image?: string | null;  // Add variant_image field
     image_type?: string;  // To identify image type
+    
   };
 }
 
@@ -651,9 +653,14 @@ const getProductImage = (item: OrderItem) => {
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                           {formatCurrency(item.discount_amount)}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
-                          {formatCurrency(item.total_price)}
-                        </td>
+<td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
+  {formatCurrency((item as any).net_amount ?? item.total_price)}
+  {item.returned_quantity > 0 && (
+    <span className="block text-xs text-orange-500 font-normal">
+      {item.returned_quantity}/{item.quantity} returned
+    </span>
+  )}
+</td>
                       </tr>
                     );
                   })}
