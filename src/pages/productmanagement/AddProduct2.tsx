@@ -9,6 +9,14 @@ import { FaCloudUploadAlt } from "react-icons/fa";
 import Swal from "sweetalert2";
 import { useNavigate } from "react-router-dom";
 
+const RETURN_OPTIONS = [
+  { label: "7 Days Return", days: 7 },
+  { label: "15 Days Return", days: 15 },
+  { label: "30 Days Return", days: 30 },
+  { label: "No Return", days: 0 },
+  { label: "Exchange Only", days: 0 },
+];  
+
 // -------------------- IMAGE RULES (validation + auto resize) --------------------
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_ORIGINAL_SIZE_MB = 10; // original file size limit (before resize)
@@ -189,6 +197,7 @@ interface ProductForm {
   manufacturing_date: string;
   expiry_date: string;
   return_policy: string;
+  return_days: number; 
   estimated_delivery_time: string;
   free_shipping: boolean;
   specifications: Specification[];
@@ -494,6 +503,7 @@ const AddProducts: React.FC<AddProductProps> = ({
       manufacturing_date: productData.manufacturing_date || "",
       expiry_date: productData.expiry_date || "",
       return_policy: productData.return_policy || "",
+      return_days: productData.return_days ?? 7,
       estimated_delivery_time: productData.estimated_delivery_time || "",
       free_shipping: productData.free_shipping || false,
       specifications: formattedSpecifications,
@@ -546,6 +556,7 @@ const AddProducts: React.FC<AddProductProps> = ({
       manufacturing_date: "",
       expiry_date: "",
       return_policy: "",
+      return_days: 7,
       estimated_delivery_time: "",
       free_shipping: false,
       specifications: [],
@@ -607,6 +618,7 @@ const AddProducts: React.FC<AddProductProps> = ({
         formData.append("manufacturing_date", values.manufacturing_date);
         formData.append("expiry_date", values.expiry_date);
         formData.append("return_policy", values.return_policy);
+        formData.append("return_days", String(values.return_days));
         formData.append("estimated_delivery_time", values.estimated_delivery_time);
         formData.append("free_shipping", values.free_shipping.toString());
 
@@ -1829,17 +1841,20 @@ const AddProducts: React.FC<AddProductProps> = ({
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Return Policy
                     </label>
-                    <select
-                      {...formik.getFieldProps("return_policy")}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Select Return Policy</option>
-                      <option value="7 Days Return">7 Days Return</option>
-                      <option value="15 Days Return">15 Days Return</option>
-                      <option value="30 Days Return">30 Days Return</option>
-                      <option value="No Return">No Return</option>
-                      <option value="Exchange Only">Exchange Only</option>
-                    </select>
+<select
+  value={formik.values.return_policy}
+  onChange={(e) => {
+    const opt = RETURN_OPTIONS.find(o => o.label === e.target.value);
+    formik.setFieldValue("return_policy", e.target.value);
+    formik.setFieldValue("return_days", opt ? opt.days : 7);
+  }}
+  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+>
+  <option value="">Select Return Policy</option>
+  {RETURN_OPTIONS.map(o => (
+    <option key={o.label} value={o.label}>{o.label}</option>
+  ))}
+</select>
                   </div>
 
                   {/* Estimated Delivery Time */}
